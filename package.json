@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "ingest": "tsx src/ingest.ts",
+    "ingest:ledningssystem": "tsx src/ingest-ledningssystem.ts",
     "start": "tsx src/server.ts",
     "dev": "tsx watch src/server.ts"
   },

@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { query } from "./chain.js";
+import { query as queryLedningssystem } from "./chain-ledningssystem.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -28,6 +29,23 @@ app.post("/chat", requireApiKey, async (req: express.Request, res: express.Respo
 
   try {
     const { answer, sources } = await query(message);
+    res.json({ answer, sources });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/ledningssystem/chat", requireApiKey, async (req: express.Request, res: express.Response) => {
+  const { message } = req.body as { message?: string };
+
+  if (!message) {
+    res.status(400).json({ error: "message is required" });
+    return;
+  }
+
+  try {
+    const { answer, sources } = await queryLedningssystem(message);
     res.json({ answer, sources });
   } catch (err) {
     console.error(err);
