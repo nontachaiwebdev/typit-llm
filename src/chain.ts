@@ -1,14 +1,16 @@
 import "dotenv/config";
-import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
+import { OpenAIEmbeddings } from "@langchain/openai";
 import { PineconeStore } from "@langchain/pinecone";
 import { Pinecone } from "@pinecone-database/pinecone";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
 import { Document } from "@langchain/core/documents";
+import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import { createChatModel } from "./llm";
 
 const SCORE_THRESHOLD = 0.50;
 
 let vectorStore: PineconeStore | null = null;
-let llm: ChatOpenAI | null = null;
+let llm: BaseChatModel | null = null;
 
 const prompt = ChatPromptTemplate.fromMessages([
   [
@@ -38,11 +40,7 @@ async function init() {
     pineconeIndex: index,
   });
 
-  llm = new ChatOpenAI({
-    model: "gpt-4o-mini",
-    apiKey: process.env.OPENAI_API_KEY!,
-    temperature: 0,
-  });
+  llm = createChatModel();
 }
 
 export interface QueryResult {
