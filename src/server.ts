@@ -2,7 +2,11 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { query } from "./chain.js";
-import { query as queryLedningssystem } from "./chain-ledningssystem.js";
+import {
+  query as queryLedningssystem,
+  resetVectorStore as resetLedningssystemVectorStore,
+} from "./chain-ledningssystem.js";
+import { reindex } from "./reindex.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -50,6 +54,24 @@ app.post("/ledningssystem/chat", requireApiKey, async (req: express.Request, res
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/ledningssystem/reindex", requireApiKey, async (_req: express.Request, res: express.Response) => {
+  try {
+    const result = await reindex({
+      pineconeIndexName: process.env.PINECONE_INDEX_LEDNINGSSYSTEM!,
+      onComplete: resetLedningssystemVectorStore,
+    });
+    res.json({
+      message: "Reindex complete",
+      filesProcessed: result.filesProcessed,
+      chunksIndexed: result.chunksIndexed,
+    });
+  } catch (err: any) {
+    console.error(err);
+    const status = err.message?.includes("already in progress") ? 409 : 500;
+    res.status(status).json({ error: err.message || "Internal server error" });
   }
 });
 

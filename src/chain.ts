@@ -48,6 +48,10 @@ export interface QueryResult {
   sources: string[];
 }
 
+export function resetVectorStore() {
+  vectorStore = null;
+}
+
 export async function query(question: string): Promise<QueryResult> {
   await init();
 
