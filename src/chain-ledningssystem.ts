@@ -161,7 +161,7 @@ export async function query(
   const sources: string[] = [
     ...new Set(
       relevantDocs
-        .map((doc) => doc.metadata?.docTitle || doc.metadata?.source)
+        .map((doc) => doc.metadata?.source)
         .filter(Boolean) as string[]
     ),
   ];
