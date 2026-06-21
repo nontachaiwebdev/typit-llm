@@ -1,9 +1,10 @@
-import { DocxLoader } from "@langchain/community/document_loaders/fs/docx";
-import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { OpenAIEmbeddings } from "@langchain/openai";
 import { PineconeStore } from "@langchain/pinecone";
 import { Pinecone } from "@pinecone-database/pinecone";
+import { readFile } from "fs/promises";
 import { downloadDocxFiles, cleanupTmpDir } from "./supabase.js";
+import { chunkDocument } from "./chunking.js";
+import { extractMetadataFromPath } from "./metadata.js";
 
 interface ReindexOptions {
   directoryId?: string;
@@ -46,32 +47,22 @@ export async function reindex(options: ReindexOptions): Promise<ReindexResult> {
   console.log(`Downloaded ${files.length} file(s)`);
 
   try {
-    // 2. Load documents
-    const allDocuments = [];
+    // 2. Load and chunk documents using structure-aware pipeline
+    const allChunks = [];
     for (const file of files) {
-      const loader = new DocxLoader(file.localPath);
-      const docs = await loader.load();
-      docs.forEach((doc) => {
-        doc.metadata.source = file.relativePath;
-      });
-      allDocuments.push(...docs);
-      console.log(`Loaded: ${file.relativePath} (${docs.length} page(s))`);
+      const metadata = extractMetadataFromPath(file.folderPath, file.fileName);
+      const buffer = await readFile(file.localPath);
+      const chunks = await chunkDocument(buffer, metadata);
+
+      allChunks.push(...chunks);
+      console.log(
+        `Loaded: ${file.relativePath} → ${chunks.length} chunk(s)`
+      );
     }
 
-    // 3. Split into chunks
-    const splitter = new RecursiveCharacterTextSplitter({
-      chunkSize: 1000,
-      chunkOverlap: 200,
-    });
-    const chunks = await splitter.splitDocuments(allDocuments);
-    const nonEmptyChunks = chunks.filter(
-      (c) => c.pageContent.trim().length > 0
-    );
-    console.log(
-      `Total chunks: ${chunks.length} (non-empty: ${nonEmptyChunks.length})`
-    );
+    console.log(`Total chunks: ${allChunks.length}`);
 
-    // 4. Clear existing vectors from Pinecone
+    // 3. Clear existing vectors from Pinecone
     const pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY! });
     const index = pinecone.Index(pineconeIndexName);
 
@@ -80,14 +71,15 @@ export async function reindex(options: ReindexOptions): Promise<ReindexResult> {
     );
     await index.namespace("").deleteAll();
 
-    // 5. Embed and upsert new vectors
+    // 4. Embed and upsert new vectors
     const embeddings = new OpenAIEmbeddings({
-      model: "text-embedding-3-small",
+      model: "text-embedding-3-large",
+      dimensions: 1536,
       apiKey: process.env.OPENAI_API_KEY!,
     });
 
     console.log("Upserting chunks into Pinecone...");
-    await PineconeStore.fromDocuments(nonEmptyChunks, embeddings, {
+    await PineconeStore.fromDocuments(allChunks, embeddings, {
       pineconeIndex: index,
     });
 
@@ -96,7 +88,7 @@ export async function reindex(options: ReindexOptions): Promise<ReindexResult> {
 
     return {
       filesProcessed: files.length,
-      chunksIndexed: nonEmptyChunks.length,
+      chunksIndexed: allChunks.length,
     };
   } finally {
     activeJobs.delete(pineconeIndexName);

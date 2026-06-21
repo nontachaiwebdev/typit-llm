@@ -1,11 +1,11 @@
 import "dotenv/config";
-import { DocxLoader } from "@langchain/community/document_loaders/fs/docx";
-import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { OpenAIEmbeddings } from "@langchain/openai";
 import { PineconeStore } from "@langchain/pinecone";
 import { Pinecone } from "@pinecone-database/pinecone";
-import { readdir, stat } from "fs/promises";
+import { readdir, stat, readFile } from "fs/promises";
 import { join } from "path";
+import { chunkDocument } from "./chunking.js";
+import { extractMetadataFromPath } from "./metadata.js";
 
 const DATA_DIR = "./data/Ledningssystem";
 
@@ -29,30 +29,27 @@ async function findDocxFiles(dir: string): Promise<string[]> {
 
 async function ingest() {
   const docxFiles = await findDocxFiles(DATA_DIR);
-
   console.log(`Found ${docxFiles.length} .docx files`);
 
-  const allDocuments = [];
+  const allChunks = [];
   for (const filePath of docxFiles) {
-    const loader = new DocxLoader(filePath);
-    const docs = await loader.load();
-    const fileName = filePath.replace(DATA_DIR + "/", "");
-    docs.forEach((doc) => {
-      doc.metadata.source = fileName;
-    });
-    allDocuments.push(...docs);
-    console.log(`Loaded: ${fileName} (${docs.length} page(s))`);
+    // Extract path segments relative to DATA_DIR
+    const relativePath = filePath.replace(DATA_DIR + "/", "");
+    const parts = relativePath.split("/");
+    const fileName = parts.pop()!;
+    const pathSegments = parts; // folder hierarchy
+
+    const metadata = extractMetadataFromPath(pathSegments, fileName);
+    const buffer = await readFile(filePath);
+    const chunks = await chunkDocument(buffer, metadata);
+
+    allChunks.push(...chunks);
+    console.log(
+      `Loaded: ${relativePath} → ${chunks.length} chunk(s)`
+    );
   }
 
-  console.log(`Total documents loaded: ${allDocuments.length}`);
-
-  const splitter = new RecursiveCharacterTextSplitter({
-    chunkSize: 1000,
-    chunkOverlap: 200,
-  });
-  const chunks = await splitter.splitDocuments(allDocuments);
-  const nonEmptyChunks = chunks.filter((c) => c.pageContent.trim().length > 0);
-  console.log(`Total chunks after splitting: ${chunks.length} (non-empty: ${nonEmptyChunks.length})`);
+  console.log(`Total chunks after splitting: ${allChunks.length}`);
 
   const pinecone = new Pinecone({
     apiKey: process.env.PINECONE_API_KEY!,
@@ -60,12 +57,13 @@ async function ingest() {
   const index = pinecone.Index(process.env.PINECONE_INDEX_LEDNINGSSYSTEM!);
 
   const embeddings = new OpenAIEmbeddings({
-    model: "text-embedding-3-small",
+    model: "text-embedding-3-large",
+    dimensions: 1536,
     apiKey: process.env.OPENAI_API_KEY!,
   });
 
   console.log("Upserting chunks into Pinecone...");
-  await PineconeStore.fromDocuments(nonEmptyChunks, embeddings, {
+  await PineconeStore.fromDocuments(allChunks, embeddings, {
     pineconeIndex: index,
   });
 

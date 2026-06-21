@@ -16,6 +16,10 @@ const DOCX_MIME =
 export interface DownloadedFile {
   localPath: string;
   relativePath: string;
+  /** Folder hierarchy from root, e.g. ["J Personal", "J - 4. Arbetsmiljö"] */
+  folderPath: string[];
+  /** Original file name, e.g. "J - 4. Arbetsmiljöpolicy.docx" */
+  fileName: string;
 }
 
 interface FileRow {
@@ -77,6 +81,47 @@ async function listDocxFiles(directoryId?: string): Promise<FileRow[]> {
 }
 
 /**
+ * Fetch all directory rows and build a map of id → FileRow.
+ * Used to reconstruct folder paths by walking parent_id chains.
+ */
+async function fetchDirectoryMap(): Promise<Map<string, FileRow>> {
+  const dirMap = new Map<string, FileRow>();
+  const { data, error } = await supabase
+    .from("files")
+    .select("*")
+    .eq("is_directory", true);
+
+  if (error) {
+    console.error("Failed to fetch directories:", error.message);
+    return dirMap;
+  }
+
+  for (const row of (data ?? []) as FileRow[]) {
+    dirMap.set(row.id, row);
+  }
+  return dirMap;
+}
+
+/**
+ * Build folder path segments for a file by walking its parent_id chain.
+ * Returns e.g. ["J Personal", "J - 4. Arbetsmiljö"]
+ */
+function buildFolderPath(
+  row: FileRow,
+  dirMap: Map<string, FileRow>
+): string[] {
+  const parts: string[] = [];
+  let parentId = row.parent_id;
+  while (parentId) {
+    const dir = dirMap.get(parentId);
+    if (!dir) break;
+    parts.unshift(dir.name);
+    parentId = dir.parent_id;
+  }
+  return parts;
+}
+
+/**
  * Download all .docx files from Supabase (DB + Storage)
  * to a temporary directory. Returns the temp dir path and list of files.
  */
@@ -86,7 +131,10 @@ export async function downloadDocxFiles(
   const tmpDir = join(tmpdir(), `typit-llm-${Date.now()}`);
   await mkdir(tmpDir, { recursive: true });
 
-  const fileRows = await listDocxFiles(directoryId);
+  const [fileRows, dirMap] = await Promise.all([
+    listDocxFiles(directoryId),
+    fetchDirectoryMap(),
+  ]);
   const downloadedFiles: DownloadedFile[] = [];
 
   for (const row of fileRows) {
@@ -103,7 +151,14 @@ export async function downloadDocxFiles(
     const buffer = Buffer.from(await data.arrayBuffer());
     await writeFile(localPath, buffer);
 
-    downloadedFiles.push({ localPath, relativePath: row.name });
+    const folderPath = buildFolderPath(row, dirMap);
+
+    downloadedFiles.push({
+      localPath,
+      relativePath: row.name,
+      folderPath,
+      fileName: row.name,
+    });
     console.log(`Downloaded: ${row.name}`);
   }
 

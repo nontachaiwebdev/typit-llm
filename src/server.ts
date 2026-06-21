@@ -5,6 +5,7 @@ import { query } from "./chain.js";
 import {
   query as queryLedningssystem,
   resetVectorStore as resetLedningssystemVectorStore,
+  type ChatMessage,
 } from "./chain-ledningssystem.js";
 import { reindex } from "./reindex.js";
 
@@ -41,7 +42,10 @@ app.post("/chat", requireApiKey, async (req: express.Request, res: express.Respo
 });
 
 app.post("/ledningssystem/chat", requireApiKey, async (req: express.Request, res: express.Response) => {
-  const { message } = req.body as { message?: string };
+  const { message, history } = req.body as {
+    message?: string;
+    history?: ChatMessage[];
+  };
 
   if (!message) {
     res.status(400).json({ error: "message is required" });
@@ -49,7 +53,7 @@ app.post("/ledningssystem/chat", requireApiKey, async (req: express.Request, res
   }
 
   try {
-    const { answer, sources } = await queryLedningssystem(message);
+    const { answer, sources } = await queryLedningssystem(message, history);
     res.json({ answer, sources });
   } catch (err) {
     console.error(err);
