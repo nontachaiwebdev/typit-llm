@@ -3,12 +3,31 @@ import { writeFile, mkdir, rm } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
 
-const supabase = createClient(
+export interface SupabaseConfig {
+  url: string;
+  serviceRoleKey: string;
+  bucket?: string;
+}
+
+// Default client built from global env vars — used when no config is passed
+// (preserves the original behavior for existing callers).
+const defaultClient = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const BUCKET = process.env.SUPABASE_BUCKET ?? "knowledge-base";
+type Client = typeof defaultClient;
+
+const DEFAULT_BUCKET = process.env.SUPABASE_BUCKET ?? "knowledge-base";
+
+/** Resolve which Supabase client + bucket to use for a given (optional) config. */
+function resolveClient(config?: SupabaseConfig): { client: Client; bucket: string } {
+  if (!config) return { client: defaultClient, bucket: DEFAULT_BUCKET };
+  return {
+    client: createClient(config.url, config.serviceRoleKey),
+    bucket: config.bucket ?? "knowledge-base",
+  };
+}
 
 const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -41,9 +60,12 @@ function isDocx(row: FileRow): boolean {
  * If directoryId is provided, BFS-traverse all descendants of that directory.
  * Otherwise, return all .docx files in the table.
  */
-async function listDocxFiles(directoryId?: string): Promise<FileRow[]> {
+async function listDocxFiles(
+  client: Client,
+  directoryId?: string
+): Promise<FileRow[]> {
   if (!directoryId) {
-    const { data, error } = await supabase
+    const { data, error } = await client
       .from("files")
       .select("*")
       .eq("is_directory", false);
@@ -60,7 +82,7 @@ async function listDocxFiles(directoryId?: string): Promise<FileRow[]> {
     const parentIds = queue;
     queue = [];
 
-    const { data, error } = await supabase
+    const { data, error } = await client
       .from("files")
       .select("*")
       .in("parent_id", parentIds);
@@ -84,9 +106,11 @@ async function listDocxFiles(directoryId?: string): Promise<FileRow[]> {
  * Fetch all directory rows and build a map of id → FileRow.
  * Used to reconstruct folder paths by walking parent_id chains.
  */
-async function fetchDirectoryMap(): Promise<Map<string, FileRow>> {
+async function fetchDirectoryMap(
+  client: Client
+): Promise<Map<string, FileRow>> {
   const dirMap = new Map<string, FileRow>();
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from("files")
     .select("*")
     .eq("is_directory", true);
@@ -126,20 +150,22 @@ function buildFolderPath(
  * to a temporary directory. Returns the temp dir path and list of files.
  */
 export async function downloadDocxFiles(
-  directoryId?: string
+  directoryId?: string,
+  config?: SupabaseConfig
 ): Promise<{ tmpDir: string; files: DownloadedFile[] }> {
+  const { client, bucket } = resolveClient(config);
   const tmpDir = join(tmpdir(), `typit-llm-${Date.now()}`);
   await mkdir(tmpDir, { recursive: true });
 
   const [fileRows, dirMap] = await Promise.all([
-    listDocxFiles(directoryId),
-    fetchDirectoryMap(),
+    listDocxFiles(client, directoryId),
+    fetchDirectoryMap(client),
   ]);
   const downloadedFiles: DownloadedFile[] = [];
 
   for (const row of fileRows) {
-    const { data, error } = await supabase.storage
-      .from(BUCKET)
+    const { data, error } = await client.storage
+      .from(bucket)
       .download(row.storage_path);
 
     if (error || !data) {

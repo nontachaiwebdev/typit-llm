@@ -2,13 +2,19 @@ import { OpenAIEmbeddings } from "@langchain/openai";
 import { PineconeStore } from "@langchain/pinecone";
 import { Pinecone } from "@pinecone-database/pinecone";
 import { readFile } from "fs/promises";
-import { downloadDocxFiles, cleanupTmpDir } from "./supabase.js";
+import {
+  downloadDocxFiles,
+  cleanupTmpDir,
+  type SupabaseConfig,
+} from "./supabase.js";
 import { chunkDocument } from "./chunking.js";
 import { extractMetadataFromPath } from "./metadata.js";
 
 interface ReindexOptions {
   directoryId?: string;
   pineconeIndexName: string;
+  /** Optional Supabase connection; defaults to the global env-var client when omitted */
+  supabase?: SupabaseConfig;
   /** Called after successful reindex so callers can reset cached vector stores */
   onComplete?: () => void;
 }
@@ -22,7 +28,7 @@ interface ReindexResult {
 const activeJobs = new Set<string>();
 
 export async function reindex(options: ReindexOptions): Promise<ReindexResult> {
-  const { directoryId, pineconeIndexName, onComplete } = options;
+  const { directoryId, pineconeIndexName, supabase, onComplete } = options;
 
   if (activeJobs.has(pineconeIndexName)) {
     throw new Error(
@@ -36,7 +42,7 @@ export async function reindex(options: ReindexOptions): Promise<ReindexResult> {
   console.log(
     `Downloading .docx files (directory: ${directoryId ?? "ALL"})...`
   );
-  const { tmpDir, files } = await downloadDocxFiles(directoryId);
+  const { tmpDir, files } = await downloadDocxFiles(directoryId, supabase);
 
   if (files.length === 0) {
     activeJobs.delete(pineconeIndexName);
@@ -69,7 +75,21 @@ export async function reindex(options: ReindexOptions): Promise<ReindexResult> {
     console.log(
       `Deleting all vectors from Pinecone index "${pineconeIndexName}"...`
     );
-    await index.namespace("").deleteAll();
+    try {
+      await index.namespace("").deleteAll();
+    } catch (err: any) {
+      // Pinecone serverless returns 404 when the default namespace has no
+      // vectors yet (nothing to delete) — treat as a no-op and continue.
+      const status = err?.status ?? err?.statusCode;
+      const msg = String(err?.message ?? err);
+      if (status === 404 || msg.includes("404") || /not found/i.test(msg)) {
+        console.log(
+          `Index "${pineconeIndexName}" has no existing vectors to delete — continuing.`
+        );
+      } else {
+        throw err;
+      }
+    }
 
     // 4. Embed and upsert new vectors
     const embeddings = new OpenAIEmbeddings({
