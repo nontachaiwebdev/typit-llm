@@ -128,36 +128,92 @@ function descendantFiles(
   return out;
 }
 
-async function fetchPermissions(
+/** Direct per-user grants (file_permissions rows with user_id = userId). */
+async function fetchUserPermissions(
   client: SupabaseClient,
   userId: string
-): Promise<{ file_id: string; access_level: string }[]> {
+): Promise<{ file_id: string }[]> {
   const { data, error } = await client
     .from("file_permissions")
-    .select("file_id, access_level")
+    .select("file_id")
     .eq("user_id", userId);
   if (error) throw new Error(`file_permissions query failed: ${error.message}`);
-  return (data ?? []) as { file_id: string; access_level: string }[];
+  return (data ?? []) as { file_id: string }[];
+}
+
+/**
+ * Groups this user belongs to. Group membership can grant files via group-level
+ * file_permissions rows (user_id = null, group_id set). If the group_members
+ * table doesn't exist yet in this project, degrade to user-only grants instead
+ * of failing the whole request.
+ */
+async function fetchUserGroupIds(
+  client: SupabaseClient,
+  userId: string
+): Promise<string[]> {
+  const { data, error } = await client
+    .from("group_members")
+    .select("group_id")
+    .eq("user_id", userId);
+  if (error) {
+    // Postgres 42P01 = undefined_table. Treat a missing table as "no groups".
+    if (error.code === "42P01" || /does not exist/i.test(error.message)) {
+      console.warn(
+        `group_members unavailable — resolving user-only grants: ${error.message}`
+      );
+      return [];
+    }
+    throw new Error(`group_members query failed: ${error.message}`);
+  }
+  return (data ?? []).map((r) => (r as { group_id: string }).group_id);
+}
+
+/** Group-level grants (file_permissions rows whose group_id is one the user is in). */
+async function fetchGroupPermissions(
+  client: SupabaseClient,
+  groupIds: string[]
+): Promise<{ file_id: string }[]> {
+  const { data, error } = await client
+    .from("file_permissions")
+    .select("file_id")
+    .in("group_id", groupIds);
+  if (error) {
+    throw new Error(`file_permissions (group) query failed: ${error.message}`);
+  }
+  return (data ?? []) as { file_id: string }[];
 }
 
 /**
  * All `source` paths this user may retrieve, folder grants expanded to files.
- * Any access_level grants read for chat. Empty array = no access (fail closed).
+ *
+ * A user's grants are the union of their direct per-user grants and the grants
+ * of every group they belong to (via group_members). Any access_level grants
+ * read for chat. Empty array = no access (fail closed).
  */
 export async function resolveAllowedSources(
   userId: string,
   cfg: PermissionConfig
 ): Promise<string[]> {
   const client = getClient(cfg);
-  const [tree, perms] = await Promise.all([
+  const [tree, userPerms, groupIds] = await Promise.all([
     getFileTree(cfg),
-    fetchPermissions(client, userId),
+    fetchUserPermissions(client, userId),
+    fetchUserGroupIds(client, userId),
   ]);
+  const groupPerms = groupIds.length
+    ? await fetchGroupPermissions(client, groupIds)
+    : [];
   const { byId, childrenByParent } = tree;
 
+  // Dedupe grants by file_id — collapses the user's overlapping manage/view rows
+  // and any file granted both directly and via a group.
+  const fileIds = new Set(
+    [...userPerms, ...groupPerms].map((p) => p.file_id)
+  );
+
   const allowed = new Set<string>();
-  for (const p of perms) {
-    const row = byId.get(p.file_id);
+  for (const fileId of fileIds) {
+    const row = byId.get(fileId);
     if (!row) continue; // grant points at a file no longer in the tree
     if (row.is_directory) {
       for (const f of descendantFiles(row.id, childrenByParent)) {
