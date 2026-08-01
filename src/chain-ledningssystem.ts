@@ -108,17 +108,29 @@ function formatContext(docs: Document[]): string {
 
 export async function query(
   question: string,
-  history: ChatMessage[] = []
+  history: ChatMessage[] = [],
+  allowedSources: string[] = []
 ): Promise<QueryResult> {
   await init();
+
+  // Fail closed: a user with no accessible documents gets no retrieval at all.
+  if (allowedSources.length === 0) {
+    return {
+      answer:
+        "Jag har tyvärr inte den informationen i de tillgängliga dokumenten.",
+      sources: [],
+    };
+  }
 
   // Step 1: Rewrite query for better retrieval
   const rewrittenQuery = await rewriteQuery(question, history);
 
-  // Step 2: Retrieve more candidates with dynamic threshold
+  // Step 2: Retrieve more candidates with dynamic threshold, restricted to the
+  // documents this user is permitted to see (pre-filter at the vector search).
   const resultsWithScore = await vectorStore!.similaritySearchWithScore(
     rewrittenQuery,
-    15
+    15,
+    { source: { $in: allowedSources } }
   );
 
   // Dynamic threshold: keep results within a reasonable range of the best score
