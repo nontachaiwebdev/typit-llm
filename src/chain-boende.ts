@@ -115,6 +115,7 @@ export async function query(
 
   // Fail closed: a user with no accessible documents gets no retrieval at all.
   if (allowedSources.length === 0) {
+    console.warn("[boende] no allowed sources for user — failing closed");
     return {
       answer:
         "Jag har tyvärr inte den informationen i de tillgängliga dokumenten.",
@@ -141,6 +142,11 @@ export async function query(
     .filter(([, score]) => score >= dynamicThreshold)
     .slice(0, 8) // cap context size
     .map(([doc]) => doc as Document);
+
+  console.log(
+    `[boende] allowed=${allowedSources.length} retrieved=${resultsWithScore.length} ` +
+      `kept=${relevantDocs.length} topScore=${topScore.toFixed(3)} query="${rewrittenQuery}"`
+  );
 
   if (relevantDocs.length === 0) {
     return {

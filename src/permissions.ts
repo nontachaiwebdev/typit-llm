@@ -128,17 +128,40 @@ function descendantFiles(
   return out;
 }
 
+const PAGE_SIZE = 1000;
+
+/**
+ * Supabase silently caps a select at 1000 rows, so read file_permissions in
+ * pages. Ordering by id keeps the pages stable so no row is skipped or repeated.
+ */
+async function fetchPermissionPages(
+  client: SupabaseClient,
+  column: "user_id" | "group_id",
+  values: string[],
+  label: string
+): Promise<{ file_id: string }[]> {
+  const all: { file_id: string }[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await client
+      .from("file_permissions")
+      .select("file_id")
+      .in(column, values)
+      .order("id")
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) throw new Error(`${label} query failed: ${error.message}`);
+    if (!data || data.length === 0) break;
+    all.push(...(data as { file_id: string }[]));
+    if (data.length < PAGE_SIZE) break;
+  }
+  return all;
+}
+
 /** Direct per-user grants (file_permissions rows with user_id = userId). */
 async function fetchUserPermissions(
   client: SupabaseClient,
   userId: string
 ): Promise<{ file_id: string }[]> {
-  const { data, error } = await client
-    .from("file_permissions")
-    .select("file_id")
-    .eq("user_id", userId);
-  if (error) throw new Error(`file_permissions query failed: ${error.message}`);
-  return (data ?? []) as { file_id: string }[];
+  return fetchPermissionPages(client, "user_id", [userId], "file_permissions");
 }
 
 /**
@@ -173,14 +196,12 @@ async function fetchGroupPermissions(
   client: SupabaseClient,
   groupIds: string[]
 ): Promise<{ file_id: string }[]> {
-  const { data, error } = await client
-    .from("file_permissions")
-    .select("file_id")
-    .in("group_id", groupIds);
-  if (error) {
-    throw new Error(`file_permissions (group) query failed: ${error.message}`);
-  }
-  return (data ?? []) as { file_id: string }[];
+  return fetchPermissionPages(
+    client,
+    "group_id",
+    groupIds,
+    "file_permissions (group)"
+  );
 }
 
 /**
