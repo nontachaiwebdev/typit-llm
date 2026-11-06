@@ -10,7 +10,14 @@ import {
 import {
   query as queryBoende,
   resetVectorStore as resetBoendeVectorStore,
+  retrieve as retrieveBoende,
+  formatContext as formatContextBoende,
 } from "./chain-boende.js";
+import {
+  retrieve as retrieveLedningssystem,
+  formatContext as formatContextLedningssystem,
+} from "./chain-ledningssystem.js";
+import { createDraftChatHandler } from "./draft/handler.js";
 import { reindex } from "./reindex.js";
 import { createClient } from "@supabase/supabase-js";
 import { createRequireUser } from "./auth.js";
@@ -24,7 +31,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json());
+// Drafting requests carry the full document (twice), so allow larger bodies.
+app.use(express.json({ limit: "2mb" }));
 
 // Per-subsystem Supabase project config (auth + file_permissions live together).
 const ledningssystemCfg: PermissionConfig = {
@@ -182,6 +190,26 @@ app.post("/boende/reindex", requireApiKey, async (_req: express.Request, res: ex
     res.status(status).json({ error: err.message || "Internal server error" });
   }
 });
+
+// AI document drafting (stateless; oc-ai-chat saves the turns).
+app.post(
+  "/ledningssystem/draft/chat",
+  requireApiKey,
+  requireUserLedningssystem,
+  createDraftChatHandler(ledningssystemCfg, {
+    retrieve: retrieveLedningssystem,
+    formatContext: formatContextLedningssystem,
+  })
+);
+app.post(
+  "/boende/draft/chat",
+  requireApiKey,
+  requireUserBoende,
+  createDraftChatHandler(boendeCfg, {
+    retrieve: retrieveBoende,
+    formatContext: formatContextBoende,
+  })
+);
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });

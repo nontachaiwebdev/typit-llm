@@ -94,9 +94,43 @@ Regler:
 }
 
 /**
+ * Vector search restricted to the user's permitted documents, with a dynamic
+ * score threshold relative to the best hit. Returns at most 8 chunks.
+ */
+export async function retrieve(
+  searchQuery: string,
+  allowedSources: string[]
+): Promise<Document[]> {
+  await init();
+  if (allowedSources.length === 0) return [];
+
+  const resultsWithScore = await vectorStore!.similaritySearchWithScore(
+    searchQuery,
+    15,
+    { source: { $in: allowedSources } }
+  );
+
+  // Dynamic threshold: keep results within a reasonable range of the best score
+  const topScore = resultsWithScore[0]?.[1] ?? 0;
+  const dynamicThreshold = Math.max(0.35, topScore - 0.15);
+
+  const relevantDocs = resultsWithScore
+    .filter(([, score]) => score >= dynamicThreshold)
+    .slice(0, 8) // cap context size
+    .map(([doc]) => doc as Document);
+
+  console.log(
+    `[boende] allowed=${allowedSources.length} retrieved=${resultsWithScore.length} ` +
+      `kept=${relevantDocs.length} topScore=${topScore.toFixed(3)} query="${searchQuery}"`
+  );
+
+  return relevantDocs;
+}
+
+/**
  * Format retrieved documents into structured context with source labels.
  */
-function formatContext(docs: Document[]): string {
+export function formatContext(docs: Document[]): string {
   return docs
     .map((doc, i) => {
       const m = doc.metadata;
@@ -126,27 +160,9 @@ export async function query(
   // Step 1: Rewrite query for better retrieval
   const rewrittenQuery = await rewriteQuery(question, history);
 
-  // Step 2: Retrieve more candidates with dynamic threshold, restricted to the
-  // documents this user is permitted to see (pre-filter at the vector search).
-  const resultsWithScore = await vectorStore!.similaritySearchWithScore(
-    rewrittenQuery,
-    15,
-    { source: { $in: allowedSources } }
-  );
-
-  // Dynamic threshold: keep results within a reasonable range of the best score
-  const topScore = resultsWithScore[0]?.[1] ?? 0;
-  const dynamicThreshold = Math.max(0.35, topScore - 0.15);
-
-  const relevantDocs = resultsWithScore
-    .filter(([, score]) => score >= dynamicThreshold)
-    .slice(0, 8) // cap context size
-    .map(([doc]) => doc as Document);
-
-  console.log(
-    `[boende] allowed=${allowedSources.length} retrieved=${resultsWithScore.length} ` +
-      `kept=${relevantDocs.length} topScore=${topScore.toFixed(3)} query="${rewrittenQuery}"`
-  );
+  // Step 2: Retrieve candidates restricted to the documents this user is
+  // permitted to see (pre-filter at the vector search).
+  const relevantDocs = await retrieve(rewrittenQuery, allowedSources);
 
   if (relevantDocs.length === 0) {
     return {

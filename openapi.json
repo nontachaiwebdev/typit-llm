@@ -17,24 +17,39 @@
         "type": "apiKey",
         "in": "header",
         "name": "x-api-key"
+      },
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Supabase access token of the company's project"
       }
     }
   },
-  "security": [{ "ApiKeyAuth": [] }],
+  "security": [
+    {
+      "ApiKeyAuth": []
+    }
+  ],
   "paths": {
     "/chat": {
       "post": {
         "summary": "Ask a question",
         "description": "Send a message and get an answer based on ingested documents",
         "operationId": "chat",
-        "security": [{ "ApiKeyAuth": [] }],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["message"],
+                "required": [
+                  "message"
+                ],
                 "properties": {
                   "message": {
                     "type": "string",
@@ -75,7 +90,9 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "error": { "type": "string" }
+                    "error": {
+                      "type": "string"
+                    }
                   }
                 }
               }
@@ -88,7 +105,327 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "error": { "type": "string" }
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ledningssystem/draft/chat": {
+      "post": {
+        "summary": "AI document drafting chat turn (ledningssystem, streaming)",
+        "description": "Stateless. The caller sends the message, chat history, current document, the document sent last turn and accept/reject decisions; the reply streams as Server-Sent Events: status {message}, text {delta}, edit {editId, type, oldText?, heading?, newText, reason, sources[]}, source {kind, title, url?, file?, reference?}, done {}, error {message}. EventSource can't be used (POST). Saving turns is done by oc-ai-chat's manage-drafts function (see oc-ai-chat/docs/draft-documents.md).",
+        "operationId": "draftChatLedningssystem",
+        "security": [
+          {
+            "ApiKeyAuth": [],
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "message",
+                  "document"
+                ],
+                "properties": {
+                  "message": {
+                    "type": "string"
+                  },
+                  "history": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "role": {
+                          "type": "string",
+                          "enum": [
+                            "user",
+                            "assistant"
+                          ]
+                        },
+                        "content": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "document": {
+                    "type": "string",
+                    "description": "Current editor markdown (may be empty)"
+                  },
+                  "lastSeenDocument": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "Document as sent with the previous completed turn"
+                  },
+                  "editDecisions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "editId",
+                        "status"
+                      ],
+                      "properties": {
+                        "editId": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "accepted",
+                            "rejected"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string"
+                        },
+                        "newText": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "SSE stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid API key or token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Document too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/boende/draft/chat": {
+      "post": {
+        "summary": "AI document drafting chat turn (boende, streaming)",
+        "description": "Stateless. The caller sends the message, chat history, current document, the document sent last turn and accept/reject decisions; the reply streams as Server-Sent Events: status {message}, text {delta}, edit {editId, type, oldText?, heading?, newText, reason, sources[]}, source {kind, title, url?, file?, reference?}, done {}, error {message}. EventSource can't be used (POST). Saving turns is done by oc-ai-chat's manage-drafts function (see oc-ai-chat/docs/draft-documents.md).",
+        "operationId": "draftChatBoende",
+        "security": [
+          {
+            "ApiKeyAuth": [],
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "message",
+                  "document"
+                ],
+                "properties": {
+                  "message": {
+                    "type": "string"
+                  },
+                  "history": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "role": {
+                          "type": "string",
+                          "enum": [
+                            "user",
+                            "assistant"
+                          ]
+                        },
+                        "content": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "document": {
+                    "type": "string",
+                    "description": "Current editor markdown (may be empty)"
+                  },
+                  "lastSeenDocument": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "Document as sent with the previous completed turn"
+                  },
+                  "editDecisions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "editId",
+                        "status"
+                      ],
+                      "properties": {
+                        "editId": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "accepted",
+                            "rejected"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string"
+                        },
+                        "newText": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "SSE stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid API key or token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Document too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
                   }
                 }
               }
@@ -109,7 +446,9 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "status": { "type": "string" }
+                    "status": {
+                      "type": "string"
+                    }
                   }
                 }
               }
