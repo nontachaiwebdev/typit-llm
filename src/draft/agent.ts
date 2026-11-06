@@ -12,6 +12,8 @@ import { buildDraftTools } from "./tools.js";
 import type { DraftDocSearch, DraftTurnInput, Emit } from "./types.js";
 
 const MAX_ITERATIONS = 8;
+// A review usually reads several laws before answering, so it gets more steps.
+const MAX_ITERATIONS_REVIEW = 12;
 const HISTORY_TURNS = 10;
 
 let model: ChatAnthropic | null = null;
@@ -72,14 +74,15 @@ export async function runDraftTurn(
 
   const today = new Date().toISOString().slice(0, 10);
   const messages: BaseMessage[] = [
-    new SystemMessage(buildSystemPrompt(today)),
+    new SystemMessage(buildSystemPrompt(today, input.mode)),
     ...input.history
       .slice(-HISTORY_TURNS)
       .map((m) => (m.role === "user" ? new HumanMessage(m.content) : new AIMessage(m.content))),
     new HumanMessage(buildTurnContext(input)),
   ];
 
-  for (let i = 0; i < MAX_ITERATIONS; i++) {
+  const maxIterations = input.mode === "review" ? MAX_ITERATIONS_REVIEW : MAX_ITERATIONS;
+  for (let i = 0; i < maxIterations; i++) {
     if (signal.aborted) return;
 
     let full: AIMessageChunk | undefined;

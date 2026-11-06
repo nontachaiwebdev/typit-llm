@@ -119,7 +119,7 @@
     "/ledningssystem/draft/chat": {
       "post": {
         "summary": "AI document drafting chat turn (ledningssystem, streaming)",
-        "description": "Stateless. The caller sends the message, chat history, current document, the document sent last turn and accept/reject decisions; the reply streams as Server-Sent Events: status {message}, text {delta}, edit {editId, type, oldText?, heading?, newText, reason, sources[]}, source {kind, title, url?, file?, reference?}, done {}, error {message}. EventSource can't be used (POST). Saving turns is done by oc-ai-chat's manage-drafts function (see oc-ai-chat/docs/draft-documents.md).",
+        "description": "Stateless. The caller sends the message, chat history, current document, the document sent last turn and accept/reject decisions; the reply streams as Server-Sent Events: status {message}, text {delta}, edit {editId, type, oldText?, heading?, newText, reason, sources[]}, source {kind, title, url?, file?, reference?}, done {}, error {message}. EventSource can't be used (POST). Saving turns is done by oc-ai-chat's manage-drafts function (see oc-ai-chat/docs/draft-documents.md). Set mode \"review\" to have the model check the editor document against current law: it replies with a structured assessment (overall verdict, what is correct, gaps with exact provisions, outdated references, what could not be verified) and may send edit events for concrete legally grounded fixes. attachments are optional read-only reference files (max 5, combined content limited by DRAFT_MAX_ATTACHMENT_CHARS, default 100000; 413 if exceeded) and are never edited.",
         "operationId": "draftChatLedningssystem",
         "security": [
           {
@@ -138,6 +138,15 @@
                   "document"
                 ],
                 "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "draft",
+                      "review"
+                    ],
+                    "default": "draft",
+                    "description": "draft = normal drafting; review = check the document against current law and suggest fixes"
+                  },
                   "message": {
                     "type": "string"
                   },
@@ -192,6 +201,28 @@
                         },
                         "newText": {
                           "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "attachments": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "description": "Read-only reference files (plain text/markdown). The model can read and compare them but never edits them.",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "name",
+                        "content"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "description": "File name, max 200 characters"
+                        },
+                        "content": {
+                          "type": "string",
+                          "description": "File text"
                         }
                       }
                     }
@@ -278,7 +309,7 @@
     "/boende/draft/chat": {
       "post": {
         "summary": "AI document drafting chat turn (boende, streaming)",
-        "description": "Stateless. The caller sends the message, chat history, current document, the document sent last turn and accept/reject decisions; the reply streams as Server-Sent Events: status {message}, text {delta}, edit {editId, type, oldText?, heading?, newText, reason, sources[]}, source {kind, title, url?, file?, reference?}, done {}, error {message}. EventSource can't be used (POST). Saving turns is done by oc-ai-chat's manage-drafts function (see oc-ai-chat/docs/draft-documents.md).",
+        "description": "Stateless. The caller sends the message, chat history, current document, the document sent last turn and accept/reject decisions; the reply streams as Server-Sent Events: status {message}, text {delta}, edit {editId, type, oldText?, heading?, newText, reason, sources[]}, source {kind, title, url?, file?, reference?}, done {}, error {message}. EventSource can't be used (POST). Saving turns is done by oc-ai-chat's manage-drafts function (see oc-ai-chat/docs/draft-documents.md). Set mode \"review\" to have the model check the editor document against current law: it replies with a structured assessment (overall verdict, what is correct, gaps with exact provisions, outdated references, what could not be verified) and may send edit events for concrete legally grounded fixes. attachments are optional read-only reference files (max 5, combined content limited by DRAFT_MAX_ATTACHMENT_CHARS, default 100000; 413 if exceeded) and are never edited.",
         "operationId": "draftChatBoende",
         "security": [
           {
@@ -297,6 +328,15 @@
                   "document"
                 ],
                 "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "draft",
+                      "review"
+                    ],
+                    "default": "draft",
+                    "description": "draft = normal drafting; review = check the document against current law and suggest fixes"
+                  },
                   "message": {
                     "type": "string"
                   },
@@ -351,6 +391,28 @@
                         },
                         "newText": {
                           "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "attachments": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "description": "Read-only reference files (plain text/markdown). The model can read and compare them but never edits them.",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "name",
+                        "content"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "description": "File name, max 200 characters"
+                        },
+                        "content": {
+                          "type": "string",
+                          "description": "File text"
                         }
                       }
                     }

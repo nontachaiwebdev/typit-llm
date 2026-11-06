@@ -1,15 +1,51 @@
 import type { Request, Response } from "express";
 import { resolveAllowedSources, type PermissionConfig } from "../permissions.js";
 import { runDraftTurn } from "./agent.js";
-import type { ChatMessage, DraftDocSearch, DraftEvent, DraftTurnInput, EditDecision } from "./types.js";
+import type {
+  Attachment,
+  ChatMessage,
+  DraftDocSearch,
+  DraftEvent,
+  DraftTurnInput,
+  EditDecision,
+} from "./types.js";
 
 const MAX_DOC_CHARS = Number(process.env.DRAFT_MAX_DOC_CHARS) || 100_000;
+const MAX_ATTACHMENT_CHARS = Number(process.env.DRAFT_MAX_ATTACHMENT_CHARS) || 100_000;
+const MAX_ATTACHMENTS = 5;
+const MAX_ATTACHMENT_NAME = 200;
 
 /** Validate and normalise the request body, or return an error. */
 function parseBody(body: any): DraftTurnInput | { error: string; status: number } {
-  const { message, history, document, lastSeenDocument, editDecisions } = body ?? {};
+  const { mode, message, attachments, history, document, lastSeenDocument, editDecisions } =
+    body ?? {};
+  if (mode !== undefined && mode !== null && mode !== "draft" && mode !== "review") {
+    return { error: 'mode must be "draft" or "review"', status: 400 };
+  }
   if (typeof message !== "string" || !message.trim()) {
     return { error: "message is required", status: 400 };
+  }
+
+  const files: Attachment[] = [];
+  if (attachments !== undefined && attachments !== null) {
+    if (!Array.isArray(attachments)) {
+      return { error: "attachments must be an array", status: 400 };
+    }
+    if (attachments.length > MAX_ATTACHMENTS) {
+      return { error: `at most ${MAX_ATTACHMENTS} attachments are allowed`, status: 400 };
+    }
+    for (const a of attachments) {
+      if (typeof a?.name !== "string" || typeof a?.content !== "string") {
+        return { error: "each attachment needs a string name and content", status: 400 };
+      }
+      // The name goes into a tag attribute in the prompt, so keep it tame.
+      const name = a.name.replace(/["<>]/g, "").trim().slice(0, MAX_ATTACHMENT_NAME) || "bilaga";
+      files.push({ name, content: a.content });
+    }
+    const total = files.reduce((n, f) => n + f.content.length, 0);
+    if (total > MAX_ATTACHMENT_CHARS) {
+      return { error: `attachments exceed ${MAX_ATTACHMENT_CHARS} characters in total`, status: 413 };
+    }
   }
   if (typeof document !== "string") {
     return { error: "document is required (may be an empty string)", status: 400 };
@@ -39,7 +75,9 @@ function parseBody(body: any): DraftTurnInput | { error: string; status: number 
         }))
     : [];
   return {
+    mode: mode === "review" ? "review" : "draft",
     message,
+    attachments: files,
     history: hist,
     document,
     lastSeenDocument: lastSeenDocument ?? undefined,

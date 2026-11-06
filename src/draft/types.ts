@@ -19,8 +19,19 @@ export interface EditDecision {
   newText?: string;
 }
 
+/** "review" = check the document against current law, then suggest fixes. */
+export type DraftMode = "draft" | "review";
+
+/** Read-only reference file sent with a turn. Never edited by the model. */
+export interface Attachment {
+  name: string;
+  content: string;
+}
+
 export interface DraftTurnInput {
+  mode: DraftMode;
   message: string;
+  attachments: Attachment[];
   history: ChatMessage[];
   document: string;
   lastSeenDocument?: string;
