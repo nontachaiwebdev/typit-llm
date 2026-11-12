@@ -7,10 +7,21 @@ import {
   cleanupTmpDir,
   type SupabaseConfig,
 } from "./supabase.js";
+import {
+  startSyncLog,
+  finishSyncLog,
+  type SyncFileDetail,
+  type SyncTarget,
+  type SyncTrigger,
+} from "./sync-log.js";
 import { chunkDocument } from "./chunking.js";
 import { extractMetadataFromPath } from "./metadata.js";
 
 interface ReindexOptions {
+  /** Knowledge base being synced (recorded in public.sync_logs) */
+  target: SyncTarget;
+  /** What started the sync (recorded in public.sync_logs) */
+  trigger: SyncTrigger;
   directoryId?: string;
   pineconeIndexName: string;
   /** Optional Supabase connection; defaults to the global env-var client when omitted */
@@ -28,7 +39,8 @@ interface ReindexResult {
 const activeJobs = new Set<string>();
 
 export async function reindex(options: ReindexOptions): Promise<ReindexResult> {
-  const { directoryId, pineconeIndexName, supabase, onComplete } = options;
+  const { target, trigger, directoryId, pineconeIndexName, supabase, onComplete } =
+    options;
 
   if (activeJobs.has(pineconeIndexName)) {
     throw new Error(
@@ -38,21 +50,42 @@ export async function reindex(options: ReindexOptions): Promise<ReindexResult> {
 
   activeJobs.add(pineconeIndexName);
 
-  // 1. Download files from Supabase (DB query + Storage download)
-  console.log(
-    `Downloading .docx files (directory: ${directoryId ?? "ALL"})...`
-  );
-  const { tmpDir, files } = await downloadDocxFiles(directoryId, supabase);
+  const logId = await startSyncLog(supabase, {
+    target,
+    trigger,
+    directoryId,
+    pineconeIndex: pineconeIndexName,
+  });
 
-  if (files.length === 0) {
-    activeJobs.delete(pineconeIndexName);
-    await cleanupTmpDir(tmpDir);
-    throw new Error("No .docx files found in Supabase");
-  }
-
-  console.log(`Downloaded ${files.length} file(s)`);
+  let tmpDir: string | undefined;
+  const details: SyncFileDetail[] = [];
+  let filesFound: number | undefined;
+  let filesDownloaded: number | undefined;
+  let filesFailed: number | undefined;
+  let chunksIndexed: number | undefined;
 
   try {
+    // 1. Download files from Supabase (DB query + Storage download)
+    console.log(
+      `Downloading .docx files (directory: ${directoryId ?? "ALL"})...`
+    );
+    const download = await downloadDocxFiles(directoryId, supabase);
+    tmpDir = download.tmpDir;
+    const { files, failed } = download;
+
+    filesDownloaded = files.length;
+    filesFailed = failed.length;
+    filesFound = files.length + failed.length;
+    for (const f of failed) {
+      details.push({ file_id: f.fileId, name: f.name, status: "download_failed", error: f.error });
+    }
+
+    if (files.length === 0) {
+      throw new Error("No .docx files found in Supabase");
+    }
+
+    console.log(`Downloaded ${files.length} file(s)`);
+
     // 2. Load and chunk documents using structure-aware pipeline
     const allChunks = [];
     for (const file of files) {
@@ -61,6 +94,12 @@ export async function reindex(options: ReindexOptions): Promise<ReindexResult> {
       const chunks = await chunkDocument(buffer, metadata);
 
       allChunks.push(...chunks);
+      details.push({
+        file_id: file.fileId,
+        name: file.fileName,
+        status: "indexed",
+        chunks: chunks.length,
+      });
       console.log(
         `Loaded: ${file.relativePath} → ${chunks.length} chunk(s)`
       );
@@ -104,14 +143,34 @@ export async function reindex(options: ReindexOptions): Promise<ReindexResult> {
     });
 
     console.log("Reindex complete!");
+    chunksIndexed = allChunks.length;
     onComplete?.();
+    await finishSyncLog(supabase, logId, {
+      status: "success",
+      filesFound,
+      filesDownloaded,
+      filesFailed,
+      chunksIndexed,
+      details,
+    });
 
     return {
       filesProcessed: files.length,
       chunksIndexed: allChunks.length,
     };
+  } catch (err: any) {
+    await finishSyncLog(supabase, logId, {
+      status: "failed",
+      filesFound,
+      filesDownloaded,
+      filesFailed,
+      chunksIndexed,
+      details,
+      errorMessage: String(err?.message ?? err),
+    });
+    throw err;
   } finally {
     activeJobs.delete(pineconeIndexName);
-    await cleanupTmpDir(tmpDir);
+    if (tmpDir) await cleanupTmpDir(tmpDir);
   }
 }

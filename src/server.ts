@@ -114,6 +114,8 @@ app.post(
 app.post("/ledningssystem/reindex", requireApiKey, async (_req: express.Request, res: express.Response) => {
   try {
     const result = await reindex({
+      target: "ledningssystem",
+      trigger: "api",
       pineconeIndexName: process.env.PINECONE_INDEX_LEDNINGSSYSTEM!,
       onComplete: () => {
         resetLedningssystemVectorStore();
@@ -168,6 +170,8 @@ app.post(
 app.post("/boende/reindex", requireApiKey, async (_req: express.Request, res: express.Response) => {
   try {
     const result = await reindex({
+      target: "boende",
+      trigger: "api",
       pineconeIndexName: process.env.PINECONE_INDEX_BOENDE!,
       supabase: {
         url: process.env.SUPABASE_URL_BOENDE!,

@@ -21,7 +21,7 @@ type Client = typeof defaultClient;
 const DEFAULT_BUCKET = process.env.SUPABASE_BUCKET ?? "knowledge-base";
 
 /** Resolve which Supabase client + bucket to use for a given (optional) config. */
-function resolveClient(config?: SupabaseConfig): { client: Client; bucket: string } {
+export function resolveClient(config?: SupabaseConfig): { client: Client; bucket: string } {
   if (!config) return { client: defaultClient, bucket: DEFAULT_BUCKET };
   return {
     client: createClient(config.url, config.serviceRoleKey),
@@ -33,12 +33,20 @@ const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 export interface DownloadedFile {
+  /** public.files row id */
+  fileId: string;
   localPath: string;
   relativePath: string;
   /** Folder hierarchy from root, e.g. ["J Personal", "J - 4. Arbetsmiljö"] */
   folderPath: string[];
   /** Original file name, e.g. "J - 4. Arbetsmiljöpolicy.docx" */
   fileName: string;
+}
+
+export interface FailedDownload {
+  fileId: string;
+  name: string;
+  error: string;
 }
 
 interface FileRow {
@@ -152,7 +160,11 @@ function buildFolderPath(
 export async function downloadDocxFiles(
   directoryId?: string,
   config?: SupabaseConfig
-): Promise<{ tmpDir: string; files: DownloadedFile[] }> {
+): Promise<{
+  tmpDir: string;
+  files: DownloadedFile[];
+  failed: FailedDownload[];
+}> {
   const { client, bucket } = resolveClient(config);
   const tmpDir = join(tmpdir(), `typit-llm-${Date.now()}`);
   await mkdir(tmpDir, { recursive: true });
@@ -162,6 +174,7 @@ export async function downloadDocxFiles(
     fetchDirectoryMap(client),
   ]);
   const downloadedFiles: DownloadedFile[] = [];
+  const failed: FailedDownload[] = [];
 
   for (const row of fileRows) {
     const { data, error } = await client.storage
@@ -170,6 +183,11 @@ export async function downloadDocxFiles(
 
     if (error || !data) {
       console.error(`Failed to download ${row.name}:`, error?.message);
+      failed.push({
+        fileId: row.id,
+        name: row.name,
+        error: error?.message ?? "No data returned",
+      });
       continue;
     }
 
@@ -180,6 +198,7 @@ export async function downloadDocxFiles(
     const folderPath = buildFolderPath(row, dirMap);
 
     downloadedFiles.push({
+      fileId: row.id,
       localPath,
       relativePath: row.name,
       folderPath,
@@ -188,7 +207,7 @@ export async function downloadDocxFiles(
     console.log(`Downloaded: ${row.name}`);
   }
 
-  return { tmpDir, files: downloadedFiles };
+  return { tmpDir, files: downloadedFiles, failed };
 }
 
 /**

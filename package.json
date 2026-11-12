@@ -9,6 +9,7 @@
     "ingest:boende": "tsx src/ingest-boende.ts",
     "verify:boende": "tsx src/verify-boende-supabase.ts",
     "reindex:boende": "tsx src/reindex-boende.ts",
+    "reindex:ledningssystem": "tsx src/reindex-ledningssystem.ts",
     "start": "tsx src/server.ts",
     "dev": "tsx watch src/server.ts"
   },

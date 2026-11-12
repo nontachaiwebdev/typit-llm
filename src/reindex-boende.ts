@@ -7,6 +7,8 @@ import { resetVectorStore } from "./chain-boende.js";
 // POST /boende/reindex endpoint, runnable without the server.
 async function main() {
   const result = await reindex({
+    target: "boende",
+    trigger: "cli",
     pineconeIndexName: process.env.PINECONE_INDEX_BOENDE!,
     supabase: {
       url: process.env.SUPABASE_URL_BOENDE!,
